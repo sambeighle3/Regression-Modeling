@@ -1,0 +1,160 @@
+---
+html_document:
+  toc: yes
+author: "Sam Beighle"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+title: "Bootstrapping Regression Metrics"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(scales)
+library(here)
+library(assertthat)
+library(rsample)
+```
+
+```{r data-input, message=F}
+d <- read_tsv(paste(here(),"satisfaction_survey.txt",sep="/"))
+
+```
+
+## Introduction
+
+In this assignment we use bootstrapping to estimate the standard error 
+of several regression coefficients. We did this in class with adjusted R-squared.
+
+In the past few assignments I've created most of the framework for you and 
+asked you to fill in pieces that I've left blank. This assignment is 
+different. I'll ask you use techniques we've discussed to answer some questions
+that I'll ask, but you'll be doing most of the coding and writing on your own. 
+Feel free to use this actual RMD file for your writing, but now you'll need 
+to know how to do code blocks and things like that. If you're anything like me,
+you'll find the 
+[R Markdown Cheat Sheet](https://github.com/rstudio/cheatsheets/raw/master/rmarkdown-2.0.pdf)
+invaluable. Please write this document with attention to things like headers, 
+spelling, 
+and formatting. It need not be as polished as a formal report, but 
+I'll ask you to revise
+it if it looks like garbage. I'm not expecting a ton of writing here, but I'd like 
+it to look nice. Remember to knit your document to HTML and commit both 
+your RMD and HTMLfiles. 
+
+## Assignment
+
+Here is what I'd like you do: 
+
+1. Begin by building a regression model using the satisfaction survey data. Have your 
+model predict satisfaction as a function of tenure and assigned sex. This is the model
+we built in class. 
+```{r}
+ggplot(d, aes(x=d$satisfaction)) +
+  geom_density()
+```
+```{r}
+plot(d$satisfaction,d$tenure)
+```
+```{r}
+boxplot(d$satisfaction ~d$assigned_sex)
+```
+
+
+```{r}
+#creating lm
+d.lm <- lm(satisfaction ~ tenure + assigned_sex, data= d)
+summary(d.lm)
+```
+1. Describe the results briefly. This means reporting the $R^2$, the residual standard
+errors, the coefficients and their standard errors. This model 
+should have four terms, with one each for the intercept and tenure and two for 
+assigned sex. 
+
+This model has an adjusted $R^2$ of 0.144 suggesting that about 14% of the variability in satisfaction is explained by the model with tenure and assigned sex. With a one year increase in tenure, satisfaction is expected to go up 0.223.The standard error is 0.0434. The intercept for assigned_sex male is 0.554 which means, on average, males have a higher satisfaction than females by 0.554. The standard error is 0.123. Also, it is important to note that the p-values are only significant for the intercept, tenure, and assigned_sex male coefficients. The assigned_sex neither coefficient is not significant. The F-statistic is 17.75 on 3 and 296 degrees of freedom with a p-value of 1.28e-10 suggesting that this model is statistically significant. 
+
+1. Use bootstrap resampling (either the `rsample` method or the manual method) to 
+generate standard error estimates for the residual standard error and the model terms. 
+Report the 90% confidence interval for these statistics from the bootstrap replicates. 
+1. Briefly compare the values from `summary.lm` to the bootstrap replicates. 
+
+```{r}
+n.sim <- 10000
+results <- tibble(
+                  residual = rep(NA,n.sim),
+                  male.coef = rep(NA,n.sim),
+                  Intercept = rep(NA,n.sim),
+                  tenure.coef = rep(NA,n.sim),
+                  neither.coef =rep(NA,n.sim))
+
+for(i in 1:n.sim){
+
+
+  new.d <- d %>% 
+    slice_sample(n=nrow(d),replace=T)
+
+  lm.new <-  lm(satisfaction ~ tenure + assigned_sex, 
+                data=new.d)
+
+  results$residual[i] <- summary(lm.new)$sigma
+  results$male.coef[i] <- summary(lm.new)$coefficients[3,2]
+  results$Intercept[i] <- summary(lm.new)$coefficients[1,2]
+  results$tenure.coef[i] <- summary(lm.new)$coefficients[2,2]
+  results$neither.coef[i] <- summary(lm.new)$coefficients[4,2]
+}
+#comparing to original lm
+ggplot(results,
+       aes(x=residual)) + 
+  geom_density() + 
+  geom_vline(xintercept = summary(d.lm)$sigma,col="red")
+
+ggplot(results,
+       aes(x=male.coef)) + 
+  geom_density() + 
+  geom_vline(xintercept = summary(d.lm)$coefficients[3,2],col="red")
+
+ggplot(results,
+       aes(x=Intercept)) + 
+  geom_density() + 
+  geom_vline(xintercept = summary(d.lm)$coefficients[1,2],col="red")
+
+ggplot(results,
+       aes(x=tenure.coef)) + 
+  geom_density() + 
+  geom_vline(xintercept = summary(d.lm)$coefficients[2,2],col="red")
+ggplot(results,
+       aes(x=neither.coef)) + 
+  geom_density() + 
+  geom_vline(xintercept = summary(d.lm)$coefficients[4,2],col="red")
+```
+```{r}
+# 90% confidence intervals
+residual_ci <- quantile(results$residual, prob= c(0.05, 0.95))
+intercept_ci <- quantile(results$Intercept, prob= c(0.05, 0.95))
+male.coef_ci <- quantile(results$male.coef,prob = c(0.05, 0.95))
+tenure.coef_ci <- quantile(results$tenure.coef,prob = c(0.05, 0.95))
+neither.coef_ci <- quantile(results$neither.coef,prob=c(0.05,0.95))
+```
+
+The previous code replicates the coefficients and residual standard error 10000 times and then compares it to the original value of the linear model in the ggplot. The residual standard error original value, in red, falls in the middle of the normally distributed replicated values suggesting that this is a reliable value. The next plot is for the male assigned sex coefficient. When compared to the original, the 10000 replicates form a normal distribution with the actual value falling in the middle indicating a solid value in this analysis. Next, the Intercept is replicated 10000 times and plotted with the original. Similar to the previous two, there is a normal distribution with the original value falling in the middle. Both the tenure and neither assigned sex original values fall well within the distribution of the 10000 replicates created by the model. This suggests that all of the values analyzed in this bootstrapping were viable. 
+
+The next step is to calculate the standard error values. The 90% confidence interval for the residual standard error is 0.942 to 1.073. The original value is 1.013 which falls in the confidence interval. Next, the confidence interval for male is 0.114 to 0.132, and the original value is 0.1232 which falls inside of the interval. The intercept confidence interval is 0.118 to 0.141 and the original value is 0.1295 which again falls inside of the expected range. Lastly, the neither assigned sex confidence interval is 0.271 to 0.459 with an original value of 0.3391. This also falls within the interval. All of the original coefficients and standard error fall within the 90% confidence interval in this analysis. 
+```{r}
+#significance of categorical variable anova
+anova <- anova(d.lm)
+anova
+```
+In order to test the significance of assigned_sex, an anova was called on the model. The anova shows an f-value of 12..513 and a p-value of 6.072e-06 providing evidence to reject the null hypothesis that there is not relationship between assigned sex and satisfaction. Therefore, we can conclude that there is a relationship between assigned sex and satisfaction based on this analysis. 
+
+### Conclusion
+After using the bootstrap resampling method to generate the standard error estimates for the residual standard error and model coefficients, we compared the 10000 replicates to the original model. The original values for all terms analyzed and plotted with the replicates showed the replicates having normal distributions and the original values near the center of that distribution. This suggests that the bootstrap method provides a solid representation of the standard errors of the terms analyzed. The standard error values are also relatively small providing additional evidence for the accuracy of the model and its standard errors. 
+
+As always, please me know if you have any questions. Feel free to ask on Teams 
+so that your
+classmates benefit from your curiosity or confusion. 
+
+
+
+
